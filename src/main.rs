@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
+mod app_window;
 mod autostart;
 mod bgra_image;
 mod clipboard;
@@ -16,4 +17,21 @@ mod single_instance;
 #[cfg(test)]
 mod test_support;
 
-fn main() {}
+use windows::core::Result;
+
+fn main() {
+    if run_application().is_err() {
+        std::process::exit(1);
+    }
+}
+
+fn run_application() -> Result<()> {
+    let Some(_single_instance_guard) = single_instance::acquire_single_instance()? else {
+        return Ok(());
+    };
+    let _ = dpi_awareness::enable_per_monitor_v2_awareness();
+    let application_window = app_window::ApplicationWindow::create()?;
+    let _prtsc_hotkey = prtsc_hotkey::register_prtsc_hotkey(application_window.handle())?;
+    app_window::run_message_loop();
+    Ok(())
+}
