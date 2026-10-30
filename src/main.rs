@@ -6,6 +6,8 @@ mod clipboard;
 mod config;
 mod save_path;
 mod save_worker;
+mod screen_capture;
+mod selection;
 #[cfg(test)]
 mod test_support;
 
