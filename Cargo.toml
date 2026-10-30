@@ -2,6 +2,7 @@
 name = "krop"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 png = "0.18.1"
