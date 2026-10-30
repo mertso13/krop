@@ -2,6 +2,7 @@
 
 mod autostart;
 mod config;
+mod save_path;
 #[cfg(test)]
 mod test_support;
 
