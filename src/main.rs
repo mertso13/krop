@@ -7,6 +7,7 @@ mod config;
 mod dpi_awareness;
 mod osd;
 mod overlay;
+mod prtsc_hotkey;
 mod save_path;
 mod save_worker;
 mod screen_capture;
