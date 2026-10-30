@@ -35,17 +35,14 @@ fn run_application() -> Result<(), Box<dyn Error>> {
     let _ = dpi_awareness::enable_per_monitor_v2_awareness();
     let _com_initialization = com_initialization::initialize_apartment_threaded()?;
     let configuration = config::Config::load_or_initialize()?;
-    let application_window = app_window::ApplicationWindow::create(configuration)?;
+    let mut application_window = app_window::ApplicationWindow::create(configuration)?;
     let _system_tray_icon = system_tray::add_tray_icon(application_window.handle())?;
-    let _hotkey_guard = match prtsc_hotkey::register_prtsc_hotkey(application_window.handle()) {
-        Ok(hotkey_guard) => hotkey_guard,
-        Err(registration_error) => {
-            prtsc_hotkey::show_prtsc_hotkey_conflict_message();
-            return Err(registration_error.into());
-        }
-    };
     if prtsc_hotkey::is_os_prtsc_snipping_active() {
+        application_window.defer_prtsc_hotkey_registration()?;
         prtsc_hotkey::prompt_to_disable_os_prtsc_snipping();
+    } else if let Err(registration_error) = application_window.register_prtsc_hotkey() {
+        prtsc_hotkey::show_prtsc_hotkey_conflict_message();
+        return Err(registration_error.into());
     }
     app_window::run_message_loop();
     Ok(())

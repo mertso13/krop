@@ -4,6 +4,10 @@ use crate::config::{Config, GroupingMode};
 use crate::folder_picker::pick_folder;
 use crate::osd::{self, OsdFeedback};
 use crate::overlay;
+use crate::prtsc_hotkey::{
+    self, PRTSC_SNIPPING_POLL_INTERVAL_MILLISECONDS, PRTSC_SNIPPING_POLL_TIMER_ID, PrtScHotkey,
+    PrtScSnippingSettleState,
+};
 use crate::save_path::current_local_time;
 use crate::save_worker::{SAVE_SUCCEEDED, WM_APP_SAVE_RESULT, spawn_png_save_worker};
 use crate::screen_capture::capture_virtual_screen;
@@ -17,9 +21,9 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-    GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL, SetWindowLongPtrW,
-    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CONTEXTMENU, WM_DESTROY, WM_HOTKEY,
-    WM_LBUTTONDBLCLK, WM_NCDESTROY, WM_RBUTTONUP, WNDCLASSW,
+    GetWindowLongPtrW, KillTimer, MSG, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL, SetTimer,
+    SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CONTEXTMENU, WM_DESTROY,
+    WM_HOTKEY, WM_LBUTTONDBLCLK, WM_NCDESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
 };
 use windows::core::{Error, PCWSTR, Result, w};
 
@@ -54,6 +58,8 @@ impl ApplicationWindow {
         let mut state = Box::new(ApplicationState {
             config,
             capture_in_progress: false,
+            prtsc_hotkey: None,
+            prtsc_snipping_settle_state: None,
         });
         unsafe {
             SetWindowLongPtrW(
@@ -71,6 +77,28 @@ impl ApplicationWindow {
     pub fn handle(&self) -> HWND {
         self.window
     }
+
+    pub fn register_prtsc_hotkey(&mut self) -> Result<()> {
+        self._state.prtsc_hotkey = Some(prtsc_hotkey::register_prtsc_hotkey(self.window)?);
+        Ok(())
+    }
+
+    pub fn defer_prtsc_hotkey_registration(&mut self) -> Result<()> {
+        self._state.prtsc_snipping_settle_state = Some(PrtScSnippingSettleState::default());
+        let timer_handle = unsafe {
+            SetTimer(
+                Some(self.window),
+                PRTSC_SNIPPING_POLL_TIMER_ID,
+                PRTSC_SNIPPING_POLL_INTERVAL_MILLISECONDS,
+                None,
+            )
+        };
+        if timer_handle == 0 {
+            self._state.prtsc_snipping_settle_state = None;
+            return Err(Error::from_thread());
+        }
+        Ok(())
+    }
 }
 
 impl Drop for ApplicationWindow {
@@ -84,6 +112,8 @@ impl Drop for ApplicationWindow {
 struct ApplicationState {
     config: Config,
     capture_in_progress: bool,
+    prtsc_hotkey: Option<PrtScHotkey>,
+    prtsc_snipping_settle_state: Option<PrtScSnippingSettleState>,
 }
 
 pub fn run_message_loop() {
@@ -122,17 +152,21 @@ unsafe extern "system" fn application_window_procedure(
         if message == WM_NCDESTROY {
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
         }
-        if message == WM_DESTROY {
-            PostQuitMessage(0);
-        }
 
         let state_pointer = GetWindowLongPtrW(window, GWLP_USERDATA) as *mut ApplicationState;
+        if message == WM_DESTROY {
+            if !state_pointer.is_null() {
+                (*state_pointer).prtsc_hotkey = None;
+            }
+            PostQuitMessage(0);
+        }
         if state_pointer.is_null() {
             return DefWindowProcW(window, message, wparam, lparam);
         }
 
         match message {
             WM_HOTKEY => handle_prtsc_hotkey(window, state_pointer),
+            WM_TIMER => handle_prtsc_snipping_poll(window, state_pointer, wparam),
             WM_APP_SAVE_RESULT => show_save_feedback(wparam),
             system_tray::WM_APP_SYSTEM_TRAY => handle_tray_callback(window, state_pointer, lparam),
             _ => {}
@@ -152,6 +186,34 @@ unsafe fn handle_prtsc_hotkey(window: HWND, state_pointer: *mut ApplicationState
         let grouping_mode = (*state_pointer).config.grouping_mode;
         run_capture_session(window, base_directory, grouping_mode);
         (*state_pointer).capture_in_progress = false;
+    }
+}
+
+unsafe fn handle_prtsc_snipping_poll(
+    window: HWND,
+    state_pointer: *mut ApplicationState,
+    timer_id: WPARAM,
+) {
+    unsafe {
+        if timer_id.0 != PRTSC_SNIPPING_POLL_TIMER_ID {
+            return;
+        }
+        let Some(settle_state) = (*state_pointer).prtsc_snipping_settle_state.as_mut() else {
+            return;
+        };
+        let os_prtsc_snipping_active = prtsc_hotkey::is_os_prtsc_snipping_active();
+        if !settle_state.should_register_prtsc_hotkey(os_prtsc_snipping_active) {
+            return;
+        }
+        (*state_pointer).prtsc_snipping_settle_state = None;
+        let _ = KillTimer(Some(window), PRTSC_SNIPPING_POLL_TIMER_ID);
+        match prtsc_hotkey::register_prtsc_hotkey(window) {
+            Ok(prtsc_hotkey_guard) => (*state_pointer).prtsc_hotkey = Some(prtsc_hotkey_guard),
+            Err(_) => {
+                prtsc_hotkey::show_prtsc_hotkey_conflict_message();
+                let _ = DestroyWindow(window);
+            }
+        }
     }
 }
 

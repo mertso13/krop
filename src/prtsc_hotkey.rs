@@ -12,6 +12,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{PCWSTR, Result, w};
 
 pub const PRTSC_HOTKEY_ID: i32 = 1;
+pub const PRTSC_SNIPPING_POLL_TIMER_ID: usize = 1;
+pub const PRTSC_SNIPPING_POLL_INTERVAL_MILLISECONDS: u32 = 300;
 
 const CURRENT_VERSION_KEY_PATH: PCWSTR = w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
 const KEYBOARD_SETTINGS_KEY_PATH: PCWSTR = w!(r"Control Panel\Keyboard");
@@ -43,6 +45,25 @@ impl Drop for PrtScHotkey {
         unsafe {
             let _ = UnregisterHotKey(Some(self.window), PRTSC_HOTKEY_ID);
         }
+    }
+}
+
+#[derive(Default)]
+pub struct PrtScSnippingSettleState {
+    saw_os_prtsc_snipping_disabled_once: bool,
+}
+
+impl PrtScSnippingSettleState {
+    pub fn should_register_prtsc_hotkey(&mut self, os_prtsc_snipping_active: bool) -> bool {
+        if os_prtsc_snipping_active {
+            self.saw_os_prtsc_snipping_disabled_once = false;
+            return false;
+        }
+        if self.saw_os_prtsc_snipping_disabled_once {
+            return true;
+        }
+        self.saw_os_prtsc_snipping_disabled_once = true;
+        false
     }
 }
 
@@ -181,6 +202,25 @@ mod tests {
         assert!(!is_os_prtsc_snipping_enabled(21999, None));
         assert!(is_os_prtsc_snipping_enabled(19045, Some(1)));
         assert!(!is_os_prtsc_snipping_enabled(19045, Some(0)));
+    }
+
+    #[test]
+    fn snipping_settle_state_registers_only_after_two_consecutive_inactive_ticks() {
+        let mut settle_state = PrtScSnippingSettleState::default();
+
+        assert!(!settle_state.should_register_prtsc_hotkey(true));
+        assert!(!settle_state.should_register_prtsc_hotkey(false));
+        assert!(settle_state.should_register_prtsc_hotkey(false));
+    }
+
+    #[test]
+    fn snipping_settle_state_restarts_when_os_snipping_becomes_active_again() {
+        let mut settle_state = PrtScSnippingSettleState::default();
+
+        assert!(!settle_state.should_register_prtsc_hotkey(false));
+        assert!(!settle_state.should_register_prtsc_hotkey(true));
+        assert!(!settle_state.should_register_prtsc_hotkey(false));
+        assert!(settle_state.should_register_prtsc_hotkey(false));
     }
 
     #[test]
