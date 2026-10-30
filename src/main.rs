@@ -5,6 +5,7 @@ mod bgra_image;
 mod clipboard;
 mod config;
 mod save_path;
+mod save_worker;
 #[cfg(test)]
 mod test_support;
 
