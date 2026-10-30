@@ -2,7 +2,9 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_NOREPEAT, RegisterHotKey, UnregisterHotKey, VK_SNAPSHOT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    MOD_NOREPEAT, RegisterHotKey, UnregisterHotKey, VK_SNAPSHOT,
+};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     IDOK, MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MB_OKCANCEL, MessageBoxW, SW_SHOWNORMAL,
@@ -16,13 +18,23 @@ const KEYBOARD_SETTINGS_KEY_PATH: PCWSTR = w!(r"Control Panel\Keyboard");
 const CURRENT_BUILD_NUMBER_VALUE_NAME: PCWSTR = w!("CurrentBuildNumber");
 const PRTSC_SNIPPING_VALUE_NAME: PCWSTR = w!("PrintScreenKeyForSnippingEnabled");
 const FIRST_WINDOWS_11_BUILD_NUMBER: u32 = 22000;
+const FIRST_DEVICES_KEYBOARD_BUILD_NUMBER: u32 = 26100;
+const DEVICES_KEYBOARD_SETTINGS_URI: PCWSTR = w!("ms-settings:devices-keyboard");
+const ACCESSIBILITY_KEYBOARD_SETTINGS_URI: PCWSTR = w!("ms-settings:easeofaccess-keyboard");
 
 pub struct PrtScHotkey {
     window: HWND,
 }
 
 pub fn register_prtsc_hotkey(window: HWND) -> Result<PrtScHotkey> {
-    unsafe { RegisterHotKey(Some(window), PRTSC_HOTKEY_ID, MOD_NOREPEAT, VK_SNAPSHOT.0 as u32)? };
+    unsafe {
+        RegisterHotKey(
+            Some(window),
+            PRTSC_HOTKEY_ID,
+            MOD_NOREPEAT,
+            VK_SNAPSHOT.0 as u32,
+        )?
+    };
     Ok(PrtScHotkey { window })
 }
 
@@ -45,7 +57,9 @@ pub fn show_prtsc_hotkey_conflict_message() {
     unsafe {
         let _ = MessageBoxW(
             None,
-            w!("PrtSc is already in use by another application.\n\nClose the application that is using PrtSc and start krop again."),
+            w!(
+                "PrtSc is already in use by another application.\n\nClose the application that is using PrtSc and start krop again."
+            ),
             w!("krop"),
             MB_OK | MB_ICONERROR,
         );
@@ -56,26 +70,33 @@ pub fn prompt_to_disable_os_prtsc_snipping() {
     let user_choice = unsafe {
         MessageBoxW(
             None,
-            w!("Windows is using the Print Screen key to open screen capture, so krop cannot capture with PrtSc.\n\nOpen Windows Keyboard Settings to turn off \"Use the Print screen key to open screen capture\"?"),
+            w!(
+                "Windows is using the Print Screen key to open screen capture, so krop cannot capture with PrtSc.\n\nOpen Windows Keyboard Settings to turn off \"Use the Print screen key to open screen capture\"?"
+            ),
             w!("krop"),
             MB_OKCANCEL | MB_ICONINFORMATION,
         )
     };
     if user_choice == IDOK {
-        open_keyboard_accessibility_settings();
+        open_os_prtsc_keyboard_settings();
     }
 }
 
-fn open_keyboard_accessibility_settings() {
+fn open_os_prtsc_keyboard_settings() {
+    let settings_uri = read_current_build_number().map_or(
+        DEVICES_KEYBOARD_SETTINGS_URI,
+        keyboard_settings_uri_for_build,
+    );
     unsafe {
-        let _ = ShellExecuteW(
-            None,
-            w!("open"),
-            w!("ms-settings:easeofaccess-keyboard"),
-            None,
-            None,
-            SW_SHOWNORMAL,
-        );
+        let _ = ShellExecuteW(None, w!("open"), settings_uri, None, None, SW_SHOWNORMAL);
+    }
+}
+
+fn keyboard_settings_uri_for_build(build_number: u32) -> PCWSTR {
+    if build_number >= FIRST_DEVICES_KEYBOARD_BUILD_NUMBER {
+        DEVICES_KEYBOARD_SETTINGS_URI
+    } else {
+        ACCESSIBILITY_KEYBOARD_SETTINGS_URI
     }
 }
 
@@ -108,7 +129,10 @@ fn read_current_build_number() -> Option<u32> {
         .iter()
         .position(|&character| character == 0)
         .unwrap_or(build_number_buffer.len());
-    String::from_utf16(&build_number_buffer[..string_end]).ok()?.parse().ok()
+    String::from_utf16(&build_number_buffer[..string_end])
+        .ok()?
+        .parse()
+        .ok()
 }
 
 fn read_prtsc_snipping_registry_value() -> Option<u32> {
@@ -157,5 +181,21 @@ mod tests {
         assert!(!is_os_prtsc_snipping_enabled(21999, None));
         assert!(is_os_prtsc_snipping_enabled(19045, Some(1)));
         assert!(!is_os_prtsc_snipping_enabled(19045, Some(0)));
+    }
+
+    #[test]
+    fn keyboard_settings_uri_targets_devices_keyboard_on_windows_11_24h2_and_newer() {
+        assert_eq!(
+            unsafe { keyboard_settings_uri_for_build(26100).to_string() }.unwrap(),
+            "ms-settings:devices-keyboard"
+        );
+        assert_eq!(
+            unsafe { keyboard_settings_uri_for_build(22631).to_string() }.unwrap(),
+            "ms-settings:easeofaccess-keyboard"
+        );
+        assert_eq!(
+            unsafe { keyboard_settings_uri_for_build(19045).to_string() }.unwrap(),
+            "ms-settings:easeofaccess-keyboard"
+        );
     }
 }
