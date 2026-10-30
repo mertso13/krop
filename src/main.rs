@@ -4,6 +4,7 @@ mod autostart;
 mod bgra_image;
 mod clipboard;
 mod config;
+mod osd;
 mod overlay;
 mod save_path;
 mod save_worker;
