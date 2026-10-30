@@ -1,4 +1,4 @@
-# krop
+# <img src="assets/icon.svg" width="32" height="32" align="top" alt="" /> krop
 
 A small Windows region screenshot tool written in Rust.
 
