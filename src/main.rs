@@ -4,6 +4,7 @@ mod autostart;
 mod bgra_image;
 mod clipboard;
 mod config;
+mod dpi_awareness;
 mod osd;
 mod overlay;
 mod save_path;
