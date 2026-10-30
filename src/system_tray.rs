@@ -4,10 +4,12 @@ use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, HMENU, IDI_APPLICATION, LoadIconW, MF_CHECKED,
-    MF_SEPARATOR, MF_STRING, PostMessageW, SetForegroundWindow, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenu, WM_APP, WM_NULL,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, HICON, HMENU,
+    IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadIconW, LoadImageW, MF_CHECKED, MF_SEPARATOR,
+    MF_STRING, PostMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow, TPM_LEFTALIGN,
+    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenu, WM_APP, WM_NULL,
 };
 use windows::core::{Error, PCWSTR, Result, w};
 
@@ -53,6 +55,28 @@ impl Drop for SystemTrayIcon {
     }
 }
 
+fn load_application_icon() -> Result<HICON> {
+    let embedded_icon = unsafe {
+        GetModuleHandleW(None).ok().and_then(|module_handle| {
+            let icon_width = GetSystemMetrics(SM_CXSMICON);
+            let icon_height = GetSystemMetrics(SM_CYSMICON);
+            LoadImageW(
+                Some(module_handle.into()),
+                PCWSTR(std::ptr::without_provenance(1)),
+                IMAGE_ICON,
+                icon_width,
+                icon_height,
+                LR_SHARED,
+            )
+            .ok()
+        })
+    };
+    match embedded_icon {
+        Some(handle) if !handle.is_invalid() => Ok(HICON(handle.0)),
+        _ => unsafe { LoadIconW(None, IDI_APPLICATION) },
+    }
+}
+
 fn tray_icon_data(window: HWND) -> Result<NOTIFYICONDATAW> {
     let mut icon_data = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
@@ -60,7 +84,7 @@ fn tray_icon_data(window: HWND) -> Result<NOTIFYICONDATAW> {
         uID: TRAY_ICON_ID,
         uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
         uCallbackMessage: WM_APP_SYSTEM_TRAY,
-        hIcon: unsafe { LoadIconW(None, IDI_APPLICATION)? },
+        hIcon: load_application_icon()?,
         ..Default::default()
     };
     let tooltip: Vec<u16> = TRAY_TOOLTIP_TEXT.encode_utf16().collect();
@@ -244,6 +268,14 @@ mod tests {
         );
         assert_eq!(command_for_menu_id(MENU_EXIT), Some(TrayCommand::Exit));
         assert_eq!(command_for_menu_id(0), None);
+    }
+
+    #[test]
+    fn application_tray_icon_loads_successfully() {
+        let icon = load_application_icon().unwrap();
+        assert!(!icon.is_invalid());
+        let default_icon = unsafe { LoadIconW(None, IDI_APPLICATION).unwrap() };
+        assert_ne!(icon, default_icon);
     }
 
     #[test]
