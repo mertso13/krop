@@ -40,7 +40,7 @@ fn build_bottom_up_device_independent_bitmap(image: &BgraImage) -> Vec<u8> {
         std::slice::from_raw_parts((&header as *const BITMAPINFOHEADER).cast::<u8>(), header_size)
     });
     for top_down_row in image.top_down_pixels().chunks_exact(image.row_stride()).rev() {
-        for pixel in top_down_row.chunks_exact(BYTES_PER_PIXEL) {
+        for pixel in top_down_row.as_chunks::<BYTES_PER_PIXEL>().0 {
             device_independent_bitmap.extend_from_slice(&[pixel[0], pixel[1], pixel[2], OPAQUE_ALPHA]);
         }
     }

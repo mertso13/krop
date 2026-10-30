@@ -338,7 +338,7 @@ mod tests {
             let expected_background = expected_bgr(background);
             let pixels = dib_section.pixels();
             assert_eq!(&pixels[..3], &expected_background);
-            assert!(pixels.chunks_exact(4).any(|pixel| pixel[..3] != expected_background));
+            assert!(pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[..3] != expected_background));
         }
     }
 

@@ -60,7 +60,9 @@ fn write_png(image: &BgraImage, png_file: File) -> io::Result<()> {
     let mut png_writer = encoder.write_header().map_err(io::Error::other)?;
     let rgb_pixels: Vec<u8> = image
         .top_down_pixels()
-        .chunks_exact(BYTES_PER_PIXEL)
+        .as_chunks::<BYTES_PER_PIXEL>()
+        .0
+        .iter()
         .flat_map(|bgra_pixel| [bgra_pixel[2], bgra_pixel[1], bgra_pixel[0]])
         .collect();
     png_writer.write_image_data(&rgb_pixels).map_err(io::Error::other)?;
