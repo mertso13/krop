@@ -37,7 +37,16 @@ fn run_application() -> Result<(), Box<dyn Error>> {
     let configuration = config::Config::load_or_initialize()?;
     let application_window = app_window::ApplicationWindow::create(configuration)?;
     let _system_tray_icon = system_tray::add_tray_icon(application_window.handle())?;
-    let _prtsc_hotkey = prtsc_hotkey::register_prtsc_hotkey(application_window.handle())?;
+    let _hotkey_guard = match prtsc_hotkey::register_prtsc_hotkey(application_window.handle()) {
+        Ok(hotkey_guard) => hotkey_guard,
+        Err(registration_error) => {
+            prtsc_hotkey::show_prtsc_hotkey_conflict_message();
+            return Err(registration_error.into());
+        }
+    };
+    if prtsc_hotkey::is_os_prtsc_snipping_active() {
+        prtsc_hotkey::prompt_to_disable_os_prtsc_snipping();
+    }
     app_window::run_message_loop();
     Ok(())
 }
