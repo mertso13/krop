@@ -20,6 +20,10 @@ By default, screenshots go to `Pictures\Screenshots` sorted into monthly folders
 
 Windows 11 binds `PrtSc` to the built-in Snipping Tool by default. If that setting is on when `krop` starts, `krop` will offer to open Windows Keyboard Settings so you can turn it off. Once you toggle it off, `krop` claims the key automatically.
 
+## Install
+
+Download `krop.exe` from the [latest release](../../releases/latest) and run it. No installer required.
+
 ## Build
 
 Requires Windows and a Rust toolchain.
