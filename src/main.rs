@@ -10,6 +10,7 @@ mod save_path;
 mod save_worker;
 mod screen_capture;
 mod selection;
+mod single_instance;
 #[cfg(test)]
 mod test_support;
 
