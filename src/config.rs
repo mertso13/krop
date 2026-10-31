@@ -18,10 +18,24 @@ pub enum GroupingMode {
     Yearly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SavedFormat {
+    #[default]
+    Png,
+    Jpg,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub base_directory: PathBuf,
     pub grouping_mode: GroupingMode,
+    #[serde(default)]
+    pub saved_format: SavedFormat,
+    #[serde(
+        default = "default_jpeg_quality",
+        deserialize_with = "deserialize_clamped_jpeg_quality"
+    )]
+    pub jpeg_quality: u8,
 }
 
 impl Config {
@@ -29,6 +43,8 @@ impl Config {
         Self {
             base_directory: pictures_directory.join("Screenshots"),
             grouping_mode: GroupingMode::default(),
+            saved_format: SavedFormat::default(),
+            jpeg_quality: default_jpeg_quality(),
         }
     }
 
@@ -39,6 +55,22 @@ impl Config {
 
     pub fn save(&self) -> io::Result<()> {
         self.save_to(&config_file_path()?)
+    }
+
+    pub fn refresh_jpeg_quality_from_disk(&mut self) {
+        if let Ok(config_path) = config_file_path() {
+            self.refresh_jpeg_quality_from(&config_path);
+        }
+    }
+
+    fn refresh_jpeg_quality_from(&mut self, config_path: &Path) {
+        let Ok(config_text) = fs::read_to_string(config_path) else {
+            return;
+        };
+        let Ok(disk_config) = toml::from_str::<Self>(&config_text) else {
+            return;
+        };
+        self.jpeg_quality = disk_config.jpeg_quality;
     }
 
     fn load_or_initialize_at(config_path: &Path, default_config: Self) -> io::Result<Self> {
@@ -61,6 +93,17 @@ impl Config {
         fs::write(&temporary_path, config_text)?;
         fs::rename(&temporary_path, config_path)
     }
+}
+
+fn default_jpeg_quality() -> u8 {
+    90
+}
+
+fn deserialize_clamped_jpeg_quality<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(i64::deserialize(deserializer)?.clamp(1, 100) as u8)
 }
 
 fn config_file_path() -> io::Result<PathBuf> {
@@ -92,6 +135,8 @@ mod tests {
             PathBuf::from(r"C:\Users\Example\Pictures\Screenshots")
         );
         assert_eq!(config.grouping_mode, GroupingMode::Monthly);
+        assert_eq!(config.saved_format, SavedFormat::Png);
+        assert_eq!(config.jpeg_quality, 90);
     }
 
     #[test]
@@ -118,6 +163,8 @@ mod tests {
             let saved_config = Config {
                 base_directory: PathBuf::from(r"D:\Captures\Ünicode Folder"),
                 grouping_mode,
+                saved_format: SavedFormat::Jpg,
+                jpeg_quality: 42,
             };
             saved_config.save_to(&config_path).unwrap();
 
@@ -127,6 +174,90 @@ mod tests {
 
             assert_eq!(loaded_config, saved_config);
         }
+    }
+
+    #[test]
+    fn legacy_config_without_format_fields_keeps_existing_settings_and_defaults_new_ones() {
+        let test_directory = unique_temporary_directory("config-legacy-upgrade");
+        let config_path = test_directory.join("config.toml");
+        fs::write(
+            &config_path,
+            "base_directory = 'D:\\Captures'\ngrouping_mode = 'Daily'\n",
+        )
+        .unwrap();
+
+        let loaded_config = Config::load_or_initialize_at(
+            &config_path,
+            Config::with_default_settings(&test_directory),
+        )
+        .unwrap();
+
+        assert_eq!(loaded_config.base_directory, PathBuf::from(r"D:\Captures"));
+        assert_eq!(loaded_config.grouping_mode, GroupingMode::Daily);
+        assert_eq!(loaded_config.saved_format, SavedFormat::Png);
+        assert_eq!(loaded_config.jpeg_quality, 90);
+    }
+
+    #[test]
+    fn out_of_range_jpeg_quality_values_are_clamped_without_resetting_other_settings() {
+        let test_directory = unique_temporary_directory("config-quality-clamping");
+        let config_path = test_directory.join("config.toml");
+        for (requested_quality, expected_quality) in
+            [(-20, 1), (0, 1), (1, 1), (90, 90), (100, 100), (150, 100), (300, 100)]
+        {
+            fs::write(
+                &config_path,
+                format!(
+                    "base_directory = 'D:\\Captures'\ngrouping_mode = 'Yearly'\nsaved_format = 'Jpg'\njpeg_quality = {requested_quality}\n"
+                ),
+            )
+            .unwrap();
+
+            let loaded_config = Config::load_or_initialize_at(
+                &config_path,
+                Config::with_default_settings(&test_directory),
+            )
+            .unwrap();
+
+            assert_eq!(
+                loaded_config.jpeg_quality, expected_quality,
+                "unexpected clamped quality for {requested_quality}"
+            );
+            assert_eq!(loaded_config.base_directory, PathBuf::from(r"D:\Captures"));
+            assert_eq!(loaded_config.grouping_mode, GroupingMode::Yearly);
+            assert_eq!(loaded_config.saved_format, SavedFormat::Jpg);
+        }
+    }
+
+    #[test]
+    fn jpeg_quality_refreshes_from_the_config_file_on_disk() {
+        let test_directory = unique_temporary_directory("config-quality-refresh");
+        let config_path = test_directory.join("config.toml");
+        let mut config = Config::with_default_settings(&test_directory);
+        config.save_to(&config_path).unwrap();
+        let edited_config_text = fs::read_to_string(&config_path)
+            .unwrap()
+            .replace("jpeg_quality = 90", "jpeg_quality = 35");
+        fs::write(&config_path, edited_config_text).unwrap();
+
+        config.refresh_jpeg_quality_from(&config_path);
+
+        assert_eq!(config.jpeg_quality, 35);
+    }
+
+    #[test]
+    fn jpeg_quality_refresh_keeps_the_current_value_when_the_file_is_missing_or_malformed() {
+        let test_directory = unique_temporary_directory("config-quality-refresh-fallback");
+        let config_path = test_directory.join("config.toml");
+        let mut config = Config::with_default_settings(&test_directory);
+        config.jpeg_quality = 55;
+
+        config.refresh_jpeg_quality_from(&config_path);
+        assert_eq!(config.jpeg_quality, 55);
+
+        fs::write(&config_path, "not = [valid").unwrap();
+        config.refresh_jpeg_quality_from(&config_path);
+        assert_eq!(config.jpeg_quality, 55);
     }
 
     #[test]

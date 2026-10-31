@@ -307,12 +307,15 @@ fn open_screenshot_folder(base_directory: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SavedFormat;
     use windows::Win32::UI::WindowsAndMessaging::{IsWindowVisible, WM_QUIT};
 
     fn test_config() -> Config {
         Config {
             base_directory: std::env::temp_dir().join("krop-test-application-window"),
             grouping_mode: GroupingMode::Monthly,
+            saved_format: SavedFormat::Png,
+            jpeg_quality: 90,
         }
     }
 

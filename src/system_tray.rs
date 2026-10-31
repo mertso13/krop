@@ -195,6 +195,7 @@ fn command_for_menu_id(menu_id: usize) -> Option<TrayCommand> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SavedFormat;
     use crate::test_support::MessageOnlyWindow;
     use std::path::PathBuf;
     use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemCount, GetMenuState, MF_BYCOMMAND};
@@ -203,6 +204,8 @@ mod tests {
         Config {
             base_directory: PathBuf::from(r"C:\Users\Example\Pictures\Screenshots"),
             grouping_mode,
+            saved_format: SavedFormat::Png,
+            jpeg_quality: 90,
         }
     }
 
