@@ -25,6 +25,15 @@ pub enum SavedFormat {
     Jpg,
 }
 
+impl SavedFormat {
+    pub fn file_extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpg => "jpg",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub base_directory: PathBuf,

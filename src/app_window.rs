@@ -1,6 +1,6 @@
 use crate::autostart;
 use crate::clipboard::copy_image_to_clipboard;
-use crate::config::{Config, GroupingMode};
+use crate::config::{Config, GroupingMode, SavedFormat};
 use crate::folder_picker::pick_folder;
 use crate::osd::{self, OsdFeedback};
 use crate::overlay;
@@ -9,7 +9,7 @@ use crate::prtsc_hotkey::{
     PrtScSnippingSettleState,
 };
 use crate::save_path::current_local_time;
-use crate::save_worker::{SAVE_SUCCEEDED, WM_APP_SAVE_RESULT, spawn_png_save_worker};
+use crate::save_worker::{SAVE_SUCCEEDED, WM_APP_SAVE_RESULT, spawn_save_worker};
 use crate::screen_capture::capture_virtual_screen;
 use crate::system_tray::{self, TrayCommand};
 use std::os::windows::ffi::OsStrExt;
@@ -184,7 +184,15 @@ unsafe fn handle_prtsc_hotkey(window: HWND, state_pointer: *mut ApplicationState
         (*state_pointer).capture_in_progress = true;
         let base_directory = (*state_pointer).config.base_directory.clone();
         let grouping_mode = (*state_pointer).config.grouping_mode;
-        run_capture_session(window, base_directory, grouping_mode);
+        let saved_format = (*state_pointer).config.saved_format;
+        let jpeg_quality = (*state_pointer).config.jpeg_quality;
+        run_capture_session(
+            window,
+            base_directory,
+            grouping_mode,
+            saved_format,
+            jpeg_quality,
+        );
         (*state_pointer).capture_in_progress = false;
     }
 }
@@ -217,7 +225,13 @@ unsafe fn handle_prtsc_snipping_poll(
     }
 }
 
-fn run_capture_session(window: HWND, base_directory: PathBuf, grouping_mode: GroupingMode) {
+fn run_capture_session(
+    window: HWND,
+    base_directory: PathBuf,
+    grouping_mode: GroupingMode,
+    saved_format: SavedFormat,
+    jpeg_quality: u8,
+) {
     let Ok(frozen_screen) = capture_virtual_screen() else {
         return;
     };
@@ -225,10 +239,12 @@ fn run_capture_session(window: HWND, base_directory: PathBuf, grouping_mode: Gro
         return;
     };
     let _ = copy_image_to_clipboard(window, &cropped_image);
-    spawn_png_save_worker(
+    spawn_save_worker(
         cropped_image,
         base_directory,
         grouping_mode,
+        saved_format,
+        jpeg_quality,
         current_local_time(),
         window,
     );

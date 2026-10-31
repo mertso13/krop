@@ -1,4 +1,4 @@
-use crate::config::GroupingMode;
+use crate::config::{GroupingMode, SavedFormat};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -40,9 +40,10 @@ pub fn period_folder_name(grouping_mode: GroupingMode, capture_time: &SYSTEMTIME
     }
 }
 
-pub fn create_unique_png_file(
+pub fn create_unique_capture_file(
     target_directory: &Path,
     capture_time: &SYSTEMTIME,
+    saved_format: SavedFormat,
 ) -> io::Result<(PathBuf, File)> {
     let timestamp_stem = format!(
         "{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
@@ -53,12 +54,13 @@ pub fn create_unique_png_file(
         capture_time.wMinute,
         capture_time.wSecond
     );
+    let file_extension = saved_format.file_extension();
     let mut collision_number: u32 = 1;
     loop {
         let file_name = if collision_number == 1 {
-            format!("{timestamp_stem}.png")
+            format!("{timestamp_stem}.{file_extension}")
         } else {
-            format!("{timestamp_stem}_{collision_number}.png")
+            format!("{timestamp_stem}_{collision_number}.{file_extension}")
         };
         let candidate_path = target_directory.join(file_name);
         match OpenOptions::new().write(true).create_new(true).open(&candidate_path) {
@@ -107,31 +109,60 @@ mod tests {
     }
 
     #[test]
-    fn same_second_captures_get_incrementing_suffixes_without_overwriting() {
-        let target_directory = unique_temporary_directory("save-path-collisions");
+    fn single_captures_use_the_extension_of_each_saved_format() {
+        let target_directory = unique_temporary_directory("save-path-single-formats");
         let capture_time = local_time(2026, 10, 30, 14, 35, 12);
 
-        let created_file_names: Vec<String> = (0..3)
-            .map(|_| {
-                let (created_path, _) = create_unique_png_file(&target_directory, &capture_time).unwrap();
-                created_path.file_name().unwrap().to_string_lossy().into_owned()
-            })
-            .collect();
+        for (saved_format, expected_extension) in
+            [(SavedFormat::Png, "png"), (SavedFormat::Jpg, "jpg")]
+        {
+            let (created_path, _) =
+                create_unique_capture_file(&target_directory, &capture_time, saved_format).unwrap();
 
-        assert_eq!(
-            created_file_names,
-            [
-                "2026-10-30_14-35-12.png",
-                "2026-10-30_14-35-12_2.png",
-                "2026-10-30_14-35-12_3.png"
-            ]
-        );
+            assert_eq!(
+                created_path,
+                target_directory.join(format!("2026-10-30_14-35-12.{expected_extension}"))
+            );
+        }
     }
 
     #[test]
-    fn missing_target_directory_returns_error() {
+    fn same_second_captures_get_incrementing_suffixes_without_overwriting() {
+        let capture_time = local_time(2026, 10, 30, 14, 35, 12);
+
+        for (saved_format, extension) in [(SavedFormat::Png, "png"), (SavedFormat::Jpg, "jpg")] {
+            let target_directory =
+                unique_temporary_directory(&format!("save-path-collisions-{extension}"));
+
+            let created_file_names: Vec<String> = (0..3)
+                .map(|_| {
+                    let (created_path, _) =
+                        create_unique_capture_file(&target_directory, &capture_time, saved_format)
+                            .unwrap();
+                    created_path.file_name().unwrap().to_string_lossy().into_owned()
+                })
+                .collect();
+
+            assert_eq!(
+                created_file_names,
+                [
+                    format!("2026-10-30_14-35-12.{extension}"),
+                    format!("2026-10-30_14-35-12_2.{extension}"),
+                    format!("2026-10-30_14-35-12_3.{extension}")
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn missing_target_directory_returns_error_for_each_saved_format() {
         let missing_directory = unique_temporary_directory("save-path-missing").join("absent");
         let capture_time = local_time(2026, 10, 30, 14, 35, 12);
-        assert!(create_unique_png_file(&missing_directory, &capture_time).is_err());
+
+        for saved_format in [SavedFormat::Png, SavedFormat::Jpg] {
+            assert!(
+                create_unique_capture_file(&missing_directory, &capture_time, saved_format).is_err()
+            );
+        }
     }
 }
