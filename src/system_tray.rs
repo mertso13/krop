@@ -1,5 +1,5 @@
 use crate::autostart;
-use crate::config::{Config, GroupingMode};
+use crate::config::{Config, GroupingMode, SavedFormat};
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
@@ -7,9 +7,10 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, HICON, HMENU,
-    IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadIconW, LoadImageW, MF_CHECKED, MF_SEPARATOR,
-    MF_STRING, PostMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow, TPM_LEFTALIGN,
-    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenu, WM_APP, WM_NULL,
+    IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadIconW, LoadImageW, MF_CHECKED, MF_POPUP,
+    MF_SEPARATOR, MF_STRING, PostMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow,
+    TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_TOPALIGN, TrackPopupMenu,
+    WM_APP, WM_NULL,
 };
 use windows::core::{Error, PCWSTR, Result, w};
 
@@ -22,14 +23,17 @@ const MENU_CHANGE_SAVE_FOLDER: usize = 2;
 const MENU_GROUPING_DAILY: usize = 3;
 const MENU_GROUPING_MONTHLY: usize = 4;
 const MENU_GROUPING_YEARLY: usize = 5;
-const MENU_START_WITH_WINDOWS: usize = 6;
-const MENU_EXIT: usize = 7;
+const MENU_SAVED_FORMAT_PNG: usize = 6;
+const MENU_SAVED_FORMAT_JPG: usize = 7;
+const MENU_START_WITH_WINDOWS: usize = 8;
+const MENU_EXIT: usize = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayCommand {
     OpenFolder,
     ChangeSaveFolder,
     SetGroupingMode(GroupingMode),
+    SetSavedFormat(SavedFormat),
     ToggleAutostart,
     Exit,
 }
@@ -152,6 +156,8 @@ fn build_context_menu(config: &Config, start_with_windows_enabled: bool) -> Resu
             append_menu_item(menu.handle(), label, menu_id, config.grouping_mode == grouping_mode)?;
         }
         AppendMenuW(menu.handle(), MF_SEPARATOR, 0, PCWSTR::null())?;
+        append_saved_format_submenu(menu.handle(), config.saved_format)?;
+        AppendMenuW(menu.handle(), MF_SEPARATOR, 0, PCWSTR::null())?;
         append_menu_item(
             menu.handle(),
             w!("Start with Windows"),
@@ -162,6 +168,28 @@ fn build_context_menu(config: &Config, start_with_windows_enabled: bool) -> Resu
         append_menu_item(menu.handle(), w!("Exit"), MENU_EXIT, false)?;
     }
     Ok(menu)
+}
+
+fn append_saved_format_submenu(menu: HMENU, saved_format: SavedFormat) -> Result<()> {
+    let submenu = ContextMenu::create()?;
+    unsafe {
+        for (format_option, label, menu_id) in saved_format_menu_entries() {
+            append_menu_item(
+                submenu.handle(),
+                label,
+                menu_id,
+                saved_format == format_option,
+            )?;
+        }
+        AppendMenuW(
+            menu,
+            MF_POPUP,
+            submenu.handle().0 as usize,
+            w!("Saved Format"),
+        )?;
+    }
+    std::mem::forget(submenu);
+    Ok(())
 }
 
 unsafe fn append_menu_item(menu: HMENU, label: PCWSTR, menu_id: usize, checked: bool) -> Result<()> {
@@ -179,6 +207,13 @@ fn grouping_mode_menu_entries() -> [(GroupingMode, PCWSTR, usize); 3] {
     ]
 }
 
+fn saved_format_menu_entries() -> [(SavedFormat, PCWSTR, usize); 2] {
+    [
+        (SavedFormat::Png, w!("PNG"), MENU_SAVED_FORMAT_PNG),
+        (SavedFormat::Jpg, w!("JPG"), MENU_SAVED_FORMAT_JPG),
+    ]
+}
+
 fn command_for_menu_id(menu_id: usize) -> Option<TrayCommand> {
     match menu_id {
         MENU_OPEN_FOLDER => Some(TrayCommand::OpenFolder),
@@ -186,6 +221,8 @@ fn command_for_menu_id(menu_id: usize) -> Option<TrayCommand> {
         MENU_GROUPING_DAILY => Some(TrayCommand::SetGroupingMode(GroupingMode::Daily)),
         MENU_GROUPING_MONTHLY => Some(TrayCommand::SetGroupingMode(GroupingMode::Monthly)),
         MENU_GROUPING_YEARLY => Some(TrayCommand::SetGroupingMode(GroupingMode::Yearly)),
+        MENU_SAVED_FORMAT_PNG => Some(TrayCommand::SetSavedFormat(SavedFormat::Png)),
+        MENU_SAVED_FORMAT_JPG => Some(TrayCommand::SetSavedFormat(SavedFormat::Jpg)),
         MENU_START_WITH_WINDOWS => Some(TrayCommand::ToggleAutostart),
         MENU_EXIT => Some(TrayCommand::Exit),
         _ => None,
@@ -195,10 +232,11 @@ fn command_for_menu_id(menu_id: usize) -> Option<TrayCommand> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::SavedFormat;
     use crate::test_support::MessageOnlyWindow;
     use std::path::PathBuf;
-    use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemCount, GetMenuState, MF_BYCOMMAND};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetMenuItemCount, GetMenuState, GetSubMenu, MF_BYCOMMAND,
+    };
 
     fn test_config(grouping_mode: GroupingMode) -> Config {
         Config {
@@ -209,16 +247,33 @@ mod tests {
         }
     }
 
-    fn menu_item_is_checked(menu: &ContextMenu, menu_id: usize) -> bool {
-        let menu_state = unsafe { GetMenuState(menu.handle(), menu_id as u32, MF_BYCOMMAND) };
+    fn test_config_with_saved_format(saved_format: SavedFormat) -> Config {
+        Config {
+            saved_format,
+            ..test_config(GroupingMode::Monthly)
+        }
+    }
+
+    fn menu_item_is_checked(menu: HMENU, menu_id: usize) -> bool {
+        let menu_state = unsafe { GetMenuState(menu, menu_id as u32, MF_BYCOMMAND) };
         assert_ne!(menu_state, u32::MAX, "menu item {menu_id} must exist");
         menu_state & MF_CHECKED.0 != 0
+    }
+
+    fn submenu_handle(menu: &ContextMenu) -> HMENU {
+        let menu_item_count = unsafe { GetMenuItemCount(Some(menu.handle())) };
+        let submenu_handles: Vec<HMENU> = (0..menu_item_count)
+            .map(|position| unsafe { GetSubMenu(menu.handle(), position) })
+            .filter(|submenu| !submenu.is_invalid())
+            .collect();
+        assert_eq!(submenu_handles.len(), 1, "expected exactly one tray submenu");
+        submenu_handles[0]
     }
 
     #[test]
     fn context_menu_lists_every_english_tray_action() {
         let menu = build_context_menu(&test_config(GroupingMode::Monthly), false).unwrap();
-        assert_eq!(unsafe { GetMenuItemCount(Some(menu.handle())) }, 10);
+        assert_eq!(unsafe { GetMenuItemCount(Some(menu.handle())) }, 12);
     }
 
     #[test]
@@ -227,9 +282,24 @@ mod tests {
             let menu = build_context_menu(&test_config(active_mode), false).unwrap();
             for (grouping_mode, _, menu_id) in grouping_mode_menu_entries() {
                 assert_eq!(
-                    menu_item_is_checked(&menu, menu_id),
+                    menu_item_is_checked(menu.handle(), menu_id),
                     grouping_mode == active_mode,
                     "unexpected check state for {grouping_mode:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn saved_format_submenu_shows_a_check_mark_only_for_the_active_format() {
+        for active_format in [SavedFormat::Png, SavedFormat::Jpg] {
+            let menu = build_context_menu(&test_config_with_saved_format(active_format), false).unwrap();
+            let submenu = submenu_handle(&menu);
+            for (saved_format, _, menu_id) in saved_format_menu_entries() {
+                assert_eq!(
+                    menu_item_is_checked(submenu, menu_id),
+                    saved_format == active_format,
+                    "unexpected check state for {saved_format:?}"
                 );
             }
         }
@@ -240,7 +310,7 @@ mod tests {
         for start_with_windows_enabled in [false, true] {
             let menu = build_context_menu(&test_config(GroupingMode::Monthly), start_with_windows_enabled).unwrap();
             assert_eq!(
-                menu_item_is_checked(&menu, MENU_START_WITH_WINDOWS),
+                menu_item_is_checked(menu.handle(), MENU_START_WITH_WINDOWS),
                 start_with_windows_enabled
             );
         }
@@ -264,6 +334,14 @@ mod tests {
         assert_eq!(
             command_for_menu_id(MENU_GROUPING_YEARLY),
             Some(TrayCommand::SetGroupingMode(GroupingMode::Yearly))
+        );
+        assert_eq!(
+            command_for_menu_id(MENU_SAVED_FORMAT_PNG),
+            Some(TrayCommand::SetSavedFormat(SavedFormat::Png))
+        );
+        assert_eq!(
+            command_for_menu_id(MENU_SAVED_FORMAT_JPG),
+            Some(TrayCommand::SetSavedFormat(SavedFormat::Jpg))
         );
         assert_eq!(
             command_for_menu_id(MENU_START_WITH_WINDOWS),

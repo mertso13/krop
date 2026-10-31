@@ -182,6 +182,7 @@ unsafe fn handle_prtsc_hotkey(window: HWND, state_pointer: *mut ApplicationState
             return;
         }
         (*state_pointer).capture_in_progress = true;
+        (*state_pointer).config.refresh_jpeg_quality_from_disk();
         let base_directory = (*state_pointer).config.base_directory.clone();
         let grouping_mode = (*state_pointer).config.grouping_mode;
         let saved_format = (*state_pointer).config.saved_format;
@@ -279,13 +280,23 @@ unsafe fn apply_tray_command(window: HWND, state_pointer: *mut ApplicationState,
             TrayCommand::OpenFolder => open_screenshot_folder(&(*state_pointer).config.base_directory),
             TrayCommand::ChangeSaveFolder => {
                 if let Ok(Some(selected_directory)) = pick_folder(window) {
-                    (*state_pointer).config.base_directory = selected_directory;
-                    let _ = (*state_pointer).config.save();
+                    let config = &mut (*state_pointer).config;
+                    config.refresh_jpeg_quality_from_disk();
+                    config.base_directory = selected_directory;
+                    let _ = config.save();
                 }
             }
             TrayCommand::SetGroupingMode(grouping_mode) => {
-                (*state_pointer).config.grouping_mode = grouping_mode;
-                let _ = (*state_pointer).config.save();
+                let config = &mut (*state_pointer).config;
+                config.refresh_jpeg_quality_from_disk();
+                config.grouping_mode = grouping_mode;
+                let _ = config.save();
+            }
+            TrayCommand::SetSavedFormat(saved_format) => {
+                let config = &mut (*state_pointer).config;
+                config.refresh_jpeg_quality_from_disk();
+                config.saved_format = saved_format;
+                let _ = config.save();
             }
             TrayCommand::ToggleAutostart => toggle_autostart(),
             TrayCommand::Exit => {

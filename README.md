@@ -11,10 +11,19 @@ Press `PrtSc` to freeze the screen across all monitors. Drag a box over what you
 As soon as you release the mouse:
 
 1. The image goes straight to your clipboard so you can `Ctrl+V` right away.
-2. Saves a lossless PNG (`YYYY-MM-DD_HH-MM-SS.png`) to disk.
+2. Saves a PNG (`YYYY-MM-DD_HH-MM-SS.png`) to disk, or a JPG if you set that format in the tray.
 3. A small pill badge pops up for a second to confirm the save without stealing window focus.
 
-By default, screenshots go to `Pictures\Screenshots` sorted into monthly folders like `2026-10 October`. You can switch between `Daily`, `Monthly`, and `Yearly` folders, change the save location, or toggle "Start with Windows" from the tray icon. Settings are saved in `%APPDATA%\krop\config.toml`.
+By default, screenshots go to `Pictures\Screenshots` sorted into monthly folders like `2026-10 October`. You can switch between `Daily`, `Monthly`, and `Yearly` folders, change the save location, choose `PNG` or `JPG` from the `Saved Format` submenu, or toggle "Start with Windows" from the tray icon. Settings are saved in `%APPDATA%\krop\config.toml`.
+
+```toml
+base_directory = 'C:\Users\Example\Pictures\Screenshots'
+grouping_mode = 'Monthly'
+saved_format = 'Jpg'
+jpeg_quality = 90
+```
+
+`jpeg_quality` sets the JPG compression quality between `1` and `100`. Lower values make smaller files. It defaults to `90`.
 
 ## Windows Print Screen conflict
 
